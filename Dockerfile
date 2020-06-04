@@ -3,15 +3,12 @@ FROM arm32v6/python:3-alpine
 RUN pip install -U pip pipenv
 
 RUN apk update
+RUN apk upgrade
+RUN apk add build-base linux-headers
 
-RUN apk add build-base
-
-RUN apk add linux-headers
-
-RUN pip install -U lifxlan
-
-RUN pip install -U gpiozero
-
-RUN pip install -U rpi.gpio
+RUN pip install -U pip pipenv
+ADD Pipfile* /tmp/
+WORKDIR /tmp
+RUN pipenv install --system --ignore-pipfile
 
 ADD lifx.py /src/
