@@ -5,7 +5,7 @@ from time import sleep
 
 from gpiozero import Button
 from signal import pause
-from lifxlan import LifxLAN
+from lifxlan import LifxLAN, errors
 
 lifx = LifxLAN()
 
@@ -26,10 +26,13 @@ class Discovery(Thread):
         global groups
         while True:
             for group in groups:
-                g = lifx.get_devices_by_group(group)
-                print("Found %s %s lights" % (len(g.devices), group))
-                groups[group] = g
-                sleep(15)
+                try:
+                    g = lifx.get_devices_by_group(group)
+                    print("Found %s %s lights" % (len(g.devices), group))
+                    groups[group] = g
+                    sleep(15)
+                except errors.WorkflowException:
+                    print("EXCEPTION!")
 
 discovery = Discovery("discovery")
 discovery.start()
@@ -60,35 +63,39 @@ def sc_timer():
 Button.was_held = False
 Button.last_release = 0
 Button.dim_down = True
+Button.brightness = None
 Button.sc_timer = sc_timer()
 
 def held(button):
-    group = groups[button_group_map[button.pin.number]]
-    if group and group.devices:
-        color = group.devices[0].get_color()
-
-    if not button.was_held:
-        print("button is being held")
-        if group and group.devices:
-            if not group.devices[0].get_power():
-                group.set_brightness(1)
-                group.set_power('on', 100)
-                button.dim_down = False
-    else:
-        print("button still held")
-
-    if group and group.devices:
-        if button.dim_down:
-            brightness = color[2] - 4600
-            if brightness < 1:
-                brightness = 1
+    try:
+        print(time())
+        group = groups[button_group_map[button.pin.number]]
+        if not button.was_held:
+            print("button is being held")
+            if group and group.devices:
+                if not group.devices[0].get_power():
+                    group.set_brightness(1)
+                    group.set_power('on', 500, True)
+                    button.dim_down = False
+                button.brightness = group.devices[0].get_color()[2]
         else:
-            brightness = color[2] + 4600
-            if brightness > 65535:
-                brightness = 65535
-        group.set_brightness(brightness, 350)
+            print("button still held")
 
-    button.was_held = True
+        if group and group.devices:
+            if button.dim_down:
+                button.brightness = button.brightness - 16384
+                if button.brightness < 1:
+                    button.brightness = 1
+            else:
+                button.brightness = button.brightness + 16384
+                if button.brightness > 65535:
+                    button.brightness = 65535
+            group.set_brightness(button.brightness, 1000, True)
+            print("Set brightness %s" % button.brightness)
+
+        button.was_held = True
+    except errors.WorkflowException:
+        print("EXCEPTION!")
 
 def released(button):
     if not button.was_held:
