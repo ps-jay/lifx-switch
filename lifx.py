@@ -51,7 +51,7 @@ def double_click():
     print("double click %s - reset scene" % button.pin.number)
     group = groups[button_group_map[button.pin.number]]
     if group and group.devices:
-        group.set_color([32767, 0, 50000, 3000])
+        group.set_color([32767, 0, 50000, 3000], 667)
         group.set_power('on')
 
 def sc_timer():
@@ -59,15 +59,43 @@ def sc_timer():
 
 Button.was_held = False
 Button.last_release = 0
+Button.dim_down = True
 Button.sc_timer = sc_timer()
 
 def held(button):
+    group = groups[button_group_map[button.pin.number]]
+    if group and group.devices:
+        color = group.devices[0].get_color()
+
+    if not button.was_held:
+        print("button is being held")
+        if group and group.devices:
+            if not group.devices[0].get_power():
+                group.set_brightness(1)
+                group.set_power('on', 100)
+                button.dim_down = False
+    else:
+        print("button still held")
+
+    if group and group.devices:
+        if button.dim_down:
+            brightness = color[2] - 4600
+            if brightness < 1:
+                brightness = 1
+        else:
+            brightness = color[2] + 4600
+            if brightness > 65535:
+                brightness = 65535
+        group.set_brightness(brightness, 350)
+
     button.was_held = True
-    print("button was held not just pressed")
 
 def released(button):
     if not button.was_held:
         pressed()
+    else:
+        button.dim_down = not button.dim_down
+
     button.was_held = False
     button.last_release = time()
 
