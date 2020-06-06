@@ -1,123 +1,105 @@
-from threading import Thread, Timer
+import argparse
 
+import lifxlan
+import yaml
+
+from threading import Thread, Timer
+from signal import pause
 from time import time
 from time import sleep
 
-from gpiozero import Button
-from signal import pause
-from lifxlan import LifxLAN, errors
-
-lifx = LifxLAN()
-
-groups = {
-    'Kitchen': None
-}
-
-button_group_map = {
-    4: 'Kitchen'
-}
+from gpiozero import Button as LifxButton
 
 class Discovery(Thread):
-    def __init__(self, name):
+    def __init__(self, name, groups):
         Thread.__init__(self)
         self.name = name
+        self.lifx = lifxlan.LifxLAN()
+        self.groups = groups
 
     def run(self):
-        global groups
+        print("DEBUG: starting discovery thread")
         while True:
-            for group in groups:
-                try:
-                    g = lifx.get_devices_by_group(group)
-                    print("Found %s %s lights" % (len(g.devices), group))
-                    groups[group] = g
-                    sleep(15)
-                except errors.WorkflowException:
-                    print("EXCEPTION!")
+            try:
+                devices = self.lifx.get_devices()
+                for device in devices:
+                    grp = device.get_group()
+                    if grp:
+                        grp = grp.lower()
+                    if grp in self.groups:
+                        found = False
+                        for light in self.groups[grp].devices:
+                            if device.get_mac_addr() == light.get_mac_addr():
+                                found = True
+                        if not found:
+                            self.groups[grp].add_device(device)
+                            print(f"INFO: {device.get_label()} added to group {grp}")
+            except lifxlan.errors.WorkflowException:
+                print("WARN: WorkflowException on discovery")
 
-discovery = Discovery("discovery")
-discovery.start()
+class LifxSwitch():
+    def __init__(self, args=None):
+        self.args = args
+        if not self.args:
+            self.parse_args()
+        if not self.args:
+            raise RuntimeError('Args not provided')
 
-def single_click():
-    button.sc_timer = sc_timer()
-    print("single click %s - power toggle" % button.pin.number)
-    group = groups[button_group_map[button.pin.number]]
-    if group and group.devices:
-        power = group.devices[0].get_power()
-        if power:
-            group.set_power('off')
-        else:
-            group.set_power('on')
+        LifxButton.last_release = 0
+        LifxButton.was_held = False
+        LifxButton.single_click = None
+        LifxButton.double_click = None
+        LifxButton.long_press = None
+        # LifxButton.sc_timer = sc_timer()
+        LifxButton.lifx_group = None
 
-def double_click():
-    button.sc_timer.cancel()
-    button.sc_timer = sc_timer()
-    print("double click %s - reset scene" % button.pin.number)
-    group = groups[button_group_map[button.pin.number]]
-    if group and group.devices:
-        group.set_color([32767, 0, 50000, 3000], 667)
-        group.set_power('on')
+        self.buttons = {}
+        self.groups = {}
+        
+        self.hold_time = 400
+        self.sc_threshold = 400
 
-def sc_timer():
-    return Timer(0.35, single_click)
+        self.parse_config(self.args.config_file)
 
-Button.was_held = False
-Button.last_release = 0
-Button.dim_down = True
-Button.brightness = None
-Button.sc_timer = sc_timer()
+        self.discovery_thread = Discovery('lifx_discovery', self.groups)
+        self.discovery_thread.start()
 
-def held(button):
-    try:
-        print(time())
-        group = groups[button_group_map[button.pin.number]]
-        if not button.was_held:
-            print("button is being held")
-            if group and group.devices:
-                if not group.devices[0].get_power():
-                    group.set_brightness(1)
-                    group.set_power('on', 500, True)
-                    button.dim_down = False
-                button.brightness = group.devices[0].get_color()[2]
-        else:
-            print("button still held")
+    def parse_args(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--config-file', '-c', required=True)
+        self.args = parser.parse_args()
 
-        if group and group.devices:
-            if button.dim_down:
-                button.brightness = button.brightness - 16384
-                if button.brightness < 1:
-                    button.brightness = 1
-            else:
-                button.brightness = button.brightness + 16384
-                if button.brightness > 65535:
-                    button.brightness = 65535
-            group.set_brightness(button.brightness, 1000, True)
-            print("Set brightness %s" % button.brightness)
+    def parse_config(self, config_file):
+        config = None
+        with open(config_file, 'rb') as fh:
+            config = yaml.safe_load(fh)
 
-        button.was_held = True
-    except errors.WorkflowException:
-        print("EXCEPTION!")
+        if 'timing' in config:
+            if 'double_click' in config['timing']:
+                self.sc_threshold = config['timing']['double_click']
+            if 'hold_time' in config['timing']:
+                self.hold_time = config['timing']['hold_time']
 
-def released(button):
-    if not button.was_held:
-        pressed()
-    else:
-        button.dim_down = not button.dim_down
+        for button_number, b_conf in config['buttons'].items():
+            button = LifxButton(button_number, hold_time=self.hold_time)
+            #button.when_held = held
+            #button.when_released = released
+            button.single_click = b_conf.get('single', None)
+            button.double_click = b_conf.get('double', None)
+            button.double_click = b_conf.get('double', None)
+            self.buttons[button_number] = button
 
-    button.was_held = False
-    button.last_release = time()
+            group_name = b_conf['group'].lower()
+            group = self.groups.get(group_name, None)
+            if not group:
+                group = lifxlan.Group()
+                self.groups[group_name] = group
 
-def pressed():
-    if (time() - button.last_release) < 0.35:
-        double_click()
-    else:
-        if not button.sc_timer.is_alive():
-            print("potential single click")
-            button.sc_timer.start()
+            button.lifx_group = {
+                'name': group_name,
+                'group': group,
+            }
 
-button = Button(4, hold_time=0.35, hold_repeat=True)
 
-button.when_held = held
-button.when_released = released
-
-print("Awaiting events")
-pause()
+if __name__ == '__main__':
+    switch = LifxSwitch()
