@@ -9,6 +9,7 @@ python_version = "3.8"
 [packages]
 lifxlan = "*"
 gpiozero = "*"
+PyYAML = "*"
 'rpi.gpio' = "*"
 
 [dev-packages]

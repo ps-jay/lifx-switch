@@ -1,0 +1,21 @@
+---
+buttons:
+    17:
+        group: Family
+        single: toggle_power
+        double: reset_or_boost 
+        long: dim_cycle_plus_colourful
+        scenes:
+            default: [32767, 0, 45940, 3000]
+            boost: [32767, 0, 65535, 3000]
+            dim: [32767, 0, 39976, 2700]
+            dimmer: [32767, 0, 20184, 2700]
+            dimmest: [32767, 0, 3604, 2500]
+
+    22:
+        group: Patio
+        single: toggle_power
+
+timing:
+    double_click: 400
+    hold_time: 300
