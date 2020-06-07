@@ -108,12 +108,32 @@ class LifxSwitch():
             }
 
     def toggle_power(self, button, group):
-        power = group.devices[0].get_power()
+        power = None
+        for device in group.devices:
+            try:
+                power = device.get_power()
+            except lifxlan.errors.WorkflowException:
+                print("INFO: WorkflowException on get_power")
+            if power is not None:
+                break
+        if power is None:
+            print("WARN: no devices replied to get_power")
+            return
         group.set_power(not power, self.transition_time, True)
         print(f"DEBUG: toggled power {not power}")
 
     def reset_or_boost(self, button, group):
-        color = group.devices[0].get_color()
+        color = None
+        for device in group.devices:
+            try:
+                color = device.get_color()
+            except lifxlan.errors.WorkflowException:
+                print("INFO: WorkflowException on get_color")
+            if color is not None:
+                break
+        if color is None:
+            print("WARN: no devices replied to get_color")
+            return
         if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
             group.set_color(button.scenes['boost'], self.transition_time, True)
             print(f"DEBUG: {button.pin.number} was default, now boosted")
@@ -125,7 +145,17 @@ class LifxSwitch():
         group.set_power('on', self.transition_time, True)
 
     def dim_cycle_plus_colourful(self, button, group):
-        color = group.devices[0].get_color()
+        color = None
+        for device in group.devices:
+            try:
+                color = device.get_color()
+            except lifxlan.errors.WorkflowException:
+                print("INFO: WorkflowException on get_color")
+            if color is not None:
+                break
+        if color is None:
+            print("WARN: no devices replied to get_color")
+            return
         if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
             group.set_color(button.scenes['dim'], self.transition_time, True)
             print(f"DEBUG: {button.pin.number} was default, now dim")
@@ -138,9 +168,9 @@ class LifxSwitch():
         elif (color[2] == button.scenes['dimmest'][2]) and (color[3] == button.scenes['dimmest'][3]):
             # multi-threaded color change
             threads = []
-            for light in group.devices:
+            for device in group.devices:
                 color = [random.randint(0, 65535), 49151, 49151, 3500] 
-                thread = Thread(target = light.set_color, args = (color, self.transition_time, True))
+                thread = Thread(target = device.set_color, args = (color, self.transition_time, True))
                 threads.append(thread)
                 thread.start()
             for thread in threads:
