@@ -1,4 +1,5 @@
 import argparse
+import random
 
 import lifxlan
 import yaml
@@ -90,7 +91,7 @@ class LifxSwitch():
             button.when_released = self.released
             button.single_click = b_conf.get('single', None)
             button.double_click = b_conf.get('double', None)
-            button.long_click = b_conf.get('hold', None)
+            button.long_click = b_conf.get('long', None)
             button.scenes = b_conf['scenes']
             button.sc_timer = self.get_sc_timer(button)
             self.buttons[button_number] = button
@@ -106,26 +107,48 @@ class LifxSwitch():
                 'group': group,
             }
 
-    def toggle_power(self, button):
-        group = button.lifx_group['group']
-        if group and group.devices:
-            power = group.devices[0].get_power()
-            group.set_power(not power, self.transition_time)
-            print(f"DEBUG: toggled power {not power}")
+    def toggle_power(self, button, group):
+        power = group.devices[0].get_power()
+        group.set_power(not power, self.transition_time, True)
+        print(f"DEBUG: toggled power {not power}")
 
-    def reset_or_boost(self, button):
-        group = button.lifx_group['group']
-        if group and group.devices:
-            color = group.devices[0].get_color()
-            if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
-                group.set_color(button.scenes['boost'], self.transition_time)
-                print(f"DEBUG: {button.pin.number} was default, now boosted")
-            else:
-                # is something non-default, now back to default
-                group.set_color(button.scenes['default'], self.transition_time)
-                print(f"DEBUG: {button.pin.number} restored to default")
+    def reset_or_boost(self, button, group):
+        color = group.devices[0].get_color()
+        if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
+            group.set_color(button.scenes['boost'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} was default, now boosted")
+        else:
+            # is something non-default, now back to default
+            group.set_color(button.scenes['default'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} restored to default")
 
-            group.set_power('on', self.transition_time)
+        group.set_power('on', self.transition_time, True)
+
+    def dim_cycle_plus_colourful(self, button, group):
+        color = group.devices[0].get_color()
+        if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
+            group.set_color(button.scenes['dim'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} was default, now dim")
+        elif (color[2] == button.scenes['dim'][2]) and (color[3] == button.scenes['dim'][3]):
+            group.set_color(button.scenes['dimmer'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} was dim, now dimmer")
+        elif (color[2] == button.scenes['dimmer'][2]) and (color[3] == button.scenes['dimmer'][3]):
+            group.set_color(button.scenes['dimmest'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} was dimmer, now dimmest")
+        elif (color[2] == button.scenes['dimmest'][2]) and (color[3] == button.scenes['dimmest'][3]):
+            # multi-threaded color change
+            threads = []
+            for light in group.devices:
+                color = [random.randint(0, 65535), 49151, 49151, 3500] 
+                thread = Thread(target = light.set_color, args = (color, self.transition_time, True))
+                threads.append(thread)
+                thread.start()
+            for thread in threads:
+                thread.join()
+            print(f"DEBUG: {button.pin.number} was dimmest, now colourful")
+        else:
+            group.set_color(button.scenes['default'], self.transition_time, True)
+            print(f"DEBUG: {button.pin.number} is now back to default")
 
     def get_sc_timer(self, button):
             return Timer(self.sc_threshold, self.single_click, args=[button])
@@ -134,7 +157,9 @@ class LifxSwitch():
         print(f"INFO: single click detected on button {button.pin.number}")
         # provide timer for next single click
         button.sc_timer = self.get_sc_timer(button)
-        getattr(self, button.single_click)(button)
+        group = button.lifx_group['group']
+        if group and group.devices:
+            getattr(self, button.single_click)(button, group)
 
     def sc_detection(self, button):
         if not button.sc_timer.is_alive():
@@ -147,10 +172,14 @@ class LifxSwitch():
         # provide timer for next single click
         button.sc_timer = self.get_sc_timer(button)
         if button.double_click:
-            getattr(self, button.double_click)(button)
+            group = button.lifx_group['group']
+            if group and group.devices:
+                getattr(self, button.double_click)(button, group)
 
     def long_press(self, button):
-        pass
+        group = button.lifx_group['group']
+        if group and group.devices:
+            getattr(self, button.long_click)(button, group)
 
     def click(self, button):
         if (time() - button.last_release) < self.sc_threshold:
@@ -161,6 +190,7 @@ class LifxSwitch():
     def held(self, button):
         print(f"DEBUG: {button.pin.number} is being held")
         button.was_held = True
+        self.long_press(button)
 
     def released(self, button):
         if button.was_held:
