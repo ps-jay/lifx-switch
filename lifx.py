@@ -52,6 +52,7 @@ class LifxSwitch():
         LifxButton.single_click = None
         LifxButton.double_click = None
         LifxButton.long_click = None
+        LifxButton.scenes = None
         LifxButton.sc_timer = None
         LifxButton.lifx_group = None
 
@@ -60,6 +61,7 @@ class LifxSwitch():
         
         self.hold_time = 0.400
         self.sc_threshold = 0.400
+        self.transition_time = 0.400 * 1000
 
         self.parse_config(self.args.config_file)
 
@@ -89,6 +91,7 @@ class LifxSwitch():
             button.single_click = b_conf.get('single', None)
             button.double_click = b_conf.get('double', None)
             button.long_click = b_conf.get('hold', None)
+            button.scenes = b_conf['scenes']
             button.sc_timer = self.get_sc_timer(button)
             self.buttons[button_number] = button
 
@@ -107,7 +110,22 @@ class LifxSwitch():
         group = button.lifx_group['group']
         if group and group.devices:
             power = group.devices[0].get_power()
-            group.set_power(not power)
+            group.set_power(not power, self.transition_time)
+            print(f"DEBUG: toggled power {not power}")
+
+    def reset_or_boost(self, button):
+        group = button.lifx_group['group']
+        if group and group.devices:
+            color = group.devices[0].get_color()
+            if (color[2] == button.scenes['default'][2]) and (color[3] == button.scenes['default'][3]):
+                group.set_color(button.scenes['boost'], self.transition_time)
+                print(f"DEBUG: {button.pin.number} was default, now boosted")
+            else:
+                # is something non-default, now back to default
+                group.set_color(button.scenes['default'], self.transition_time)
+                print(f"DEBUG: {button.pin.number} restored to default")
+
+            group.set_power('on', self.transition_time)
 
     def get_sc_timer(self, button):
             return Timer(self.sc_threshold, self.single_click, args=[button])
@@ -125,8 +143,11 @@ class LifxSwitch():
 
     def double_click(self, button):
         print(f"INFO: double click detected on button {button.pin.number}")
+        button.sc_timer.cancel()
+        # provide timer for next single click
+        button.sc_timer = self.get_sc_timer(button)
         if button.double_click:
-            getattr(self, button.double_click)()
+            getattr(self, button.double_click)(button)
 
     def long_press(self, button):
         pass
