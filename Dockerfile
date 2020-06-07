@@ -30,7 +30,7 @@ ADD .pylintrc /src/
 ADD lifx.py /src/
 
 WORKDIR /src
-RUN pylint *.py || true
+RUN pylint *.py
 
 ##==----
 
