@@ -4,6 +4,7 @@ Provides physical switching of Lifx devices from a Raspberry Pi
 
 import argparse
 import random
+import sys
 
 from threading import Thread, Timer
 from time import time
@@ -20,12 +21,14 @@ class Discovery(Thread):
         Thread.__init__(self)
         self.name = name
         self.lifx = lifxlan.LifxLAN()
+        self.lifx.source_id = 1982
         self.groups = groups
 
     def run(self):
         print("DEBUG: starting discovery thread")
         sleep_time = 5
         devices_max = 0
+        devices_found_history = ['s', 't', 'a', 'r', 't']
         while True:  # pylint: disable=too-many-nested-blocks
             try:
                 devices = self.lifx.get_devices()
@@ -48,6 +51,17 @@ class Discovery(Thread):
                     # increase sleep until max sleep of 15 minutes
                     if sleep_time < (15 * 60):
                         sleep_time = sleep_time + 5
+
+                devices_found_history.insert(0, len(devices))
+                devices_found_history.pop()
+                if not devices:
+                    # have we found 0 devices 5x in a row?  exit, and allow docker to reboot us
+                    if (devices_found_history.count(devices_found_history[0]) == len(devices_found_history)):
+                        print(f"WARN: {len(devices)} Lifx devices found 5 times in a row, exiting")
+                        sys.exit(99)
+                    # found no devices!?  reset sleep_time
+                    print(f"DEBUG: since {len(devices)} Lifx devices found, resetting sleep_time")
+                    sleep_time = 5
 
             except lifxlan.errors.WorkflowException:
                 print("WARN: WorkflowException on discovery")
@@ -113,14 +127,13 @@ class LifxSwitch():
             button.single_click = b_conf.get('single', None)
             button.double_click = b_conf.get('double', None)
             button.long_click = b_conf.get('long', None)
-            button.scenes = b_conf['scenes']
+            button.scenes = b_conf.get('scenes', None)
             button.sc_timer = self.get_sc_timer(button)
             self.buttons[button_number] = button
 
             group_name = b_conf['group'].lower()
-            group = self.groups.get(group_name, None)
-            if not group:
-                group = lifxlan.Group()
+            if not self.groups.get(group_name, None):
+                group = lifxlan.Group([])
                 self.groups[group_name] = group
 
             button.lifx_group = {
@@ -248,8 +261,11 @@ class LifxSwitch():
 
     def click(self, button):
         """Receives a click event (from button released event)"""
-        if (time() - button.last_release) < self.sc_threshold:
+        if button.double_click and ((time() - button.last_release) < self.sc_threshold):
             self.double_click(button)
+        elif not button.double_click:
+            # no double click functionality defined, straight to single click
+            self.single_click(button)
         else:
             self.sc_detection(button)
 
@@ -257,7 +273,11 @@ class LifxSwitch():
         """Receives a button held event"""
         print(f"DEBUG: {button.pin.number} is being held")
         button.was_held = True
-        self.long_press(button)
+        if button.long_click:
+            self.long_press(button)
+        else:
+            # no long click functionality defined, straight to single click
+            self.single_click(button)
 
     def released(self, button):
         """Receives a button released event"""
