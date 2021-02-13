@@ -36,7 +36,7 @@ RUN pylint *.py
 
 FROM base AS runtime
 
-COPY --from=compile /usr/local/lib/python3.8/site-packages/ /usr/local/lib/python3.8/site-packages/
+COPY --from=compile /usr/local/lib/python3.9/site-packages/ /usr/local/lib/python3.9/site-packages/
 COPY --from=pylint /src/*.py /app/
 RUN chmod -R a+r /app
 
